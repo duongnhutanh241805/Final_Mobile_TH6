@@ -1,0 +1,19 @@
+{
+  "scheme": "acme",
+  "userInterfaceStyle": "automatic",
+  "orientation": "default",
+  "web": {
+    "output": "static"
+  },
+  "plugins": [
+    [
+      "expo-router",
+      {
+        "origin": "https://n"
+      }
+    ],
+    "expo-sqlite"
+  ],
+  "name": "duongnhatanh22728821",
+  "slug": "duongnhatanh22728821"
+}

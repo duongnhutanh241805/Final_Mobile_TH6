@@ -14,7 +14,14 @@ import {
   ScrollView
 } from 'react-native';
 import { Link } from 'expo-router';
-import { getMovies, addMovie, toggleWatched, getMovieById, updateMovie } from '../services/db';
+import { 
+  getMovies, 
+  addMovie, 
+  toggleWatched, 
+  getMovieById, 
+  updateMovie, 
+  deleteMovie 
+} from '../services/db';
 import { Movie } from '../services/db';
 
 interface MovieForm {
@@ -38,6 +45,7 @@ export default function MoviesScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [editingMovie, setEditingMovie] = useState<Movie | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     loadMovies();
@@ -79,7 +87,6 @@ export default function MoviesScreen() {
 
   const handleEditMovie = async (movie: Movie) => {
     try {
-      // Load chi tiết phim từ database
       const movieDetail = await getMovieById(movie.id);
       if (movieDetail) {
         setEditingMovie(movieDetail);
@@ -97,6 +104,41 @@ export default function MoviesScreen() {
     }
   };
 
+  const handleDeleteMovie = (movie: Movie) => {
+    Alert.alert(
+      'Xác nhận xóa',
+      `Bạn có chắc muốn xóa phim "${movie.title}"?`,
+      [
+        {
+          text: 'Hủy',
+          style: 'cancel'
+        },
+        {
+          text: 'Xóa',
+          style: 'destructive',
+          onPress: () => confirmDeleteMovie(movie.id)
+        }
+      ]
+    );
+  };
+
+  const confirmDeleteMovie = async (id: number) => {
+    try {
+      setDeletingId(id);
+      await deleteMovie(id);
+      
+      // Cập nhật UI ngay lập tức
+      setMovies(prevMovies => prevMovies.filter(movie => movie.id !== id));
+      
+      Alert.alert('Thành công', 'Đã xóa phim thành công');
+    } catch (err) {
+      Alert.alert('Lỗi', 'Không thể xóa phim');
+      console.error('Error deleting movie:', err);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleLongPress = (movie: Movie) => {
     Alert.alert(
       'Tùy chọn',
@@ -105,6 +147,11 @@ export default function MoviesScreen() {
         {
           text: 'Sửa',
           onPress: () => handleEditMovie(movie)
+        },
+        {
+          text: 'Xóa',
+          style: 'destructive',
+          onPress: () => handleDeleteMovie(movie)
         },
         {
           text: 'Đánh dấu đã xem',
@@ -245,17 +292,19 @@ export default function MoviesScreen() {
     <TouchableOpacity
       onPress={() => handleToggleWatched(item)}
       onLongPress={() => handleLongPress(item)}
-      disabled={togglingId === item.id}
+      disabled={togglingId === item.id || deletingId === item.id}
       style={[
         styles.movieCard,
-        item.watched && styles.movieCardWatched
+        item.watched && styles.movieCardWatched,
+        deletingId === item.id && styles.movieCardDeleting
       ]}
     >
       <View style={styles.movieHeader}>
         <View style={styles.titleContainer}>
           <Text style={[
             styles.title,
-            item.watched && styles.titleWatched
+            item.watched && styles.titleWatched,
+            deletingId === item.id && styles.textDeleting
           ]}>
             {item.title}
           </Text>
@@ -269,24 +318,40 @@ export default function MoviesScreen() {
           {item.rating && (
             <View style={[
               styles.ratingBadge,
-              item.watched && styles.ratingBadgeWatched
+              item.watched && styles.ratingBadgeWatched,
+              deletingId === item.id && styles.ratingBadgeDeleting
             ]}>
               <Text style={styles.ratingText}>{item.rating}/10</Text>
             </View>
           )}
-          <TouchableOpacity 
-            style={styles.editButton}
-            onPress={() => handleEditMovie(item)}
-          >
-            <Text style={styles.editButtonText}>Sửa</Text>
-          </TouchableOpacity>
+          <View style={styles.actionButtons}>
+            <TouchableOpacity 
+              style={styles.editButton}
+              onPress={() => handleEditMovie(item)}
+              disabled={deletingId === item.id}
+            >
+              <Text style={styles.editButtonText}>Sửa</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.deleteButton}
+              onPress={() => handleDeleteMovie(item)}
+              disabled={deletingId === item.id}
+            >
+              {deletingId === item.id ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text style={styles.deleteButtonText}>Xóa</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
       
       <View style={styles.movieDetails}>
         <Text style={[
           styles.year,
-          item.watched && styles.textWatched
+          item.watched && styles.textWatched,
+          deletingId === item.id && styles.textDeleting
         ]}>
           Năm: {item.year}
         </Text>
@@ -298,12 +363,14 @@ export default function MoviesScreen() {
               <View 
                 style={[
                   styles.watchedDot, 
-                  item.watched ? styles.watched : styles.notWatched
+                  item.watched ? styles.watched : styles.notWatched,
+                  deletingId === item.id && styles.watchedDotDeleting
                 ]} 
               />
               <Text style={[
                 styles.watchedText,
-                item.watched && styles.textWatched
+                item.watched && styles.textWatched,
+                deletingId === item.id && styles.textDeleting
               ]}>
                 {item.watched ? 'Đã xem' : 'Chưa xem'}
               </Text>
@@ -562,6 +629,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
     opacity: 0.8,
   },
+  movieCardDeleting: {
+    backgroundColor: '#fff3cd',
+    opacity: 0.6,
+  },
   movieHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -579,6 +650,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   title: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -588,6 +664,9 @@ const styles = StyleSheet.create({
   titleWatched: {
     textDecorationLine: 'line-through',
     color: '#666',
+  },
+  textDeleting: {
+    color: '#999',
   },
   watchedIcon: {
     backgroundColor: '#4CAF50',
@@ -605,13 +684,26 @@ const styles = StyleSheet.create({
   },
   editButton: {
     backgroundColor: '#FFA000',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
   },
   editButtonText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  deleteButton: {
+    backgroundColor: '#dc3545',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: 'white',
+    fontSize: 11,
     fontWeight: '600',
   },
   ratingBadge: {
@@ -623,6 +715,9 @@ const styles = StyleSheet.create({
   },
   ratingBadgeWatched: {
     backgroundColor: '#ccc',
+  },
+  ratingBadgeDeleting: {
+    backgroundColor: '#e0e0e0',
   },
   ratingText: {
     fontSize: 12,
@@ -657,6 +752,9 @@ const styles = StyleSheet.create({
   },
   notWatched: {
     backgroundColor: '#ff9800',
+  },
+  watchedDotDeleting: {
+    backgroundColor: '#ccc',
   },
   watchedText: {
     fontSize: 14,

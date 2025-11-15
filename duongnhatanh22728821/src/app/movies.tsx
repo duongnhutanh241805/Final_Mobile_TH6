@@ -14,7 +14,8 @@ import {
   ScrollView
 } from 'react-native';
 import { Link } from 'expo-router';
-import { getMovies, addMovie } from '../services/db';
+import { getMovies, addMovie, toggleWatched} from '../services/db';
+
 
 interface Movie {
   id: number;
@@ -43,6 +44,7 @@ export default function MoviesScreen() {
   });
   const [formErrors, setFormErrors] = useState<{[key: string]: string}>({});
   const [submitting, setSubmitting] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   useEffect(() => {
     loadMovies();
@@ -62,15 +64,34 @@ export default function MoviesScreen() {
     }
   };
 
+  const handleToggleWatched = async (movie: Movie) => {
+    try {
+      setTogglingId(movie.id);
+      await toggleWatched(movie.id, movie.watched);
+      
+      // Cập nhật state local ngay lập tức để có feedback UI
+      setMovies(prevMovies => 
+        prevMovies.map(m => 
+          m.id === movie.id 
+            ? { ...m, watched: m.watched ? 0 : 1 }
+            : m
+        )
+      );
+    } catch (err) {
+      Alert.alert('Lỗi', 'Không thể cập nhật trạng thái');
+      console.error('Error toggling watched:', err);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   const validateForm = (): boolean => {
     const errors: {[key: string]: string} = {};
 
-    // Validate title (required)
     if (!formData.title.trim()) {
       errors.title = 'Tiêu đề không được để trống';
     }
 
-    // Validate year (optional but must be valid if provided)
     if (formData.year.trim()) {
       const year = parseInt(formData.year);
       const currentYear = new Date().getFullYear();
@@ -80,7 +101,6 @@ export default function MoviesScreen() {
       }
     }
 
-    // Validate rating (optional but must be valid if provided)
     if (formData.rating.trim()) {
       const rating = parseInt(formData.rating);
       if (isNaN(rating) || rating < 1 || rating > 10) {
@@ -103,18 +123,16 @@ export default function MoviesScreen() {
         title: formData.title.trim(),
         year: formData.year.trim() ? parseInt(formData.year) : undefined,
         rating: formData.rating.trim() ? parseInt(formData.rating) : undefined,
-        watched: 0, // Mặc định chưa xem
+        watched: 0,
         created_at: Date.now()
       };
 
       await addMovie(movieData);
       
-      // Đóng modal và reset form
       setModalVisible(false);
       setFormData({ title: '', year: '', rating: '' });
       setFormErrors({});
       
-      // Reload danh sách phim
       await loadMovies();
       
       Alert.alert('Thành công', 'Đã thêm phim mới thành công!');
@@ -132,7 +150,6 @@ export default function MoviesScreen() {
       [field]: value
     }));
     
-    // Clear error when user starts typing
     if (formErrors[field]) {
       setFormErrors(prev => ({
         ...prev,
@@ -154,31 +171,67 @@ export default function MoviesScreen() {
   };
 
   const renderMovieItem = ({ item }: { item: Movie }) => (
-    <View style={styles.movieCard}>
+    <TouchableOpacity
+      onPress={() => handleToggleWatched(item)}
+      disabled={togglingId === item.id}
+      style={[
+        styles.movieCard,
+        item.watched && styles.movieCardWatched
+      ]}
+    >
       <View style={styles.movieHeader}>
-        <Text style={styles.title}>{item.title}</Text>
+        <View style={styles.titleContainer}>
+          <Text style={[
+            styles.title,
+            item.watched && styles.titleWatched
+          ]}>
+            {item.title}
+          </Text>
+          {item.watched && (
+            <View style={styles.watchedIcon}>
+              <Text style={styles.watchedIconText}>✓</Text>
+            </View>
+          )}
+        </View>
         {item.rating && (
-          <View style={styles.ratingBadge}>
+          <View style={[
+            styles.ratingBadge,
+            item.watched && styles.ratingBadgeWatched
+          ]}>
             <Text style={styles.ratingText}>{item.rating}/10</Text>
           </View>
         )}
       </View>
       
       <View style={styles.movieDetails}>
-        <Text style={styles.year}>Năm: {item.year}</Text>
+        <Text style={[
+          styles.year,
+          item.watched && styles.textWatched
+        ]}>
+          Năm: {item.year}
+        </Text>
         <View style={styles.watchedContainer}>
-          <View 
-            style={[
-              styles.watchedDot, 
-              item.watched ? styles.watched : styles.notWatched
-            ]} 
-          />
-          <Text style={styles.watchedText}>
-            {item.watched ? 'Đã xem' : 'Chưa xem'}
-          </Text>
+          {togglingId === item.id ? (
+            <ActivityIndicator size="small" color="#007AFF" />
+          ) : (
+            <>
+              <View 
+                style={[
+                  styles.watchedDot, 
+                  item.watched ? styles.watched : styles.notWatched
+                ]} 
+              />
+              <Text style={[
+                styles.watchedText,
+                item.watched && styles.textWatched
+              ]}>
+                {item.watched ? 'Đã xem' : 'Chưa xem'}
+              </Text>
+            </>
+          )}
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderEmptyState = () => (
@@ -417,18 +470,45 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
+  movieCardWatched: {
+    backgroundColor: '#f8f9fa',
+    opacity: 0.8,
+  },
   movieHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: 8,
   },
+  titleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
   title: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
     flex: 1,
-    marginRight: 8,
+  },
+  titleWatched: {
+    textDecorationLine: 'line-through',
+    color: '#666',
+  },
+  watchedIcon: {
+    backgroundColor: '#4CAF50',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  watchedIconText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   ratingBadge: {
     backgroundColor: '#ffd700',
@@ -436,6 +516,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
     minWidth: 50,
+  },
+  ratingBadgeWatched: {
+    backgroundColor: '#ccc',
   },
   ratingText: {
     fontSize: 12,
@@ -451,6 +534,9 @@ const styles = StyleSheet.create({
   year: {
     fontSize: 14,
     color: '#666',
+  },
+  textWatched: {
+    color: '#999',
   },
   watchedContainer: {
     flexDirection: 'row',

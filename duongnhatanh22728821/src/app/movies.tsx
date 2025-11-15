@@ -14,17 +14,8 @@ import {
   ScrollView
 } from 'react-native';
 import { Link } from 'expo-router';
-import { getMovies, addMovie, toggleWatched} from '../services/db';
-
-
-interface Movie {
-  id: number;
-  title: string;
-  year: number;
-  watched: number;
-  rating: number;
-  created_at: number;
-}
+import { getMovies, addMovie, toggleWatched, getMovieById, updateMovie } from '../services/db';
+import { Movie } from '../services/db';
 
 interface MovieForm {
   title: string;
@@ -36,7 +27,8 @@ export default function MoviesScreen() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
   const [formData, setFormData] = useState<MovieForm>({
     title: '',
     year: '',
@@ -45,6 +37,7 @@ export default function MoviesScreen() {
   const [formErrors, setFormErrors] = useState<{[key: string]: string}>({});
   const [submitting, setSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [editingMovie, setEditingMovie] = useState<Movie | null>(null);
 
   useEffect(() => {
     loadMovies();
@@ -69,7 +62,6 @@ export default function MoviesScreen() {
       setTogglingId(movie.id);
       await toggleWatched(movie.id, movie.watched);
       
-      // Cập nhật state local ngay lập tức để có feedback UI
       setMovies(prevMovies => 
         prevMovies.map(m => 
           m.id === movie.id 
@@ -83,6 +75,47 @@ export default function MoviesScreen() {
     } finally {
       setTogglingId(null);
     }
+  };
+
+  const handleEditMovie = async (movie: Movie) => {
+    try {
+      // Load chi tiết phim từ database
+      const movieDetail = await getMovieById(movie.id);
+      if (movieDetail) {
+        setEditingMovie(movieDetail);
+        setFormData({
+          title: movieDetail.title,
+          year: movieDetail.year?.toString() || '',
+          rating: movieDetail.rating?.toString() || ''
+        });
+        setFormErrors({});
+        setEditModalVisible(true);
+      }
+    } catch (err) {
+      Alert.alert('Lỗi', 'Không thể tải thông tin phim');
+      console.error('Error loading movie details:', err);
+    }
+  };
+
+  const handleLongPress = (movie: Movie) => {
+    Alert.alert(
+      'Tùy chọn',
+      `Chọn hành động cho "${movie.title}"`,
+      [
+        {
+          text: 'Sửa',
+          onPress: () => handleEditMovie(movie)
+        },
+        {
+          text: 'Đánh dấu đã xem',
+          onPress: () => handleToggleWatched(movie)
+        },
+        {
+          text: 'Hủy',
+          style: 'cancel'
+        }
+      ]
+    );
   };
 
   const validateForm = (): boolean => {
@@ -112,7 +145,7 @@ export default function MoviesScreen() {
     return Object.keys(errors).length === 0;
   };
 
-  const handleSubmit = async () => {
+  const handleAddSubmit = async () => {
     if (!validateForm()) {
       return;
     }
@@ -129,7 +162,7 @@ export default function MoviesScreen() {
 
       await addMovie(movieData);
       
-      setModalVisible(false);
+      setAddModalVisible(false);
       setFormData({ title: '', year: '', rating: '' });
       setFormErrors({});
       
@@ -139,6 +172,37 @@ export default function MoviesScreen() {
     } catch (err) {
       Alert.alert('Lỗi', 'Không thể thêm phim mới');
       console.error('Error adding movie:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleEditSubmit = async () => {
+    if (!validateForm() || !editingMovie) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const updates = {
+        title: formData.title.trim(),
+        year: formData.year.trim() ? parseInt(formData.year) : null,
+        rating: formData.rating.trim() ? parseInt(formData.rating) : null,
+      };
+
+      await updateMovie(editingMovie.id, updates);
+      
+      setEditModalVisible(false);
+      setFormData({ title: '', year: '', rating: '' });
+      setFormErrors({});
+      setEditingMovie(null);
+      
+      await loadMovies();
+      
+      Alert.alert('Thành công', 'Đã cập nhật thông tin phim thành công!');
+    } catch (err) {
+      Alert.alert('Lỗi', 'Không thể cập nhật thông tin phim');
+      console.error('Error updating movie:', err);
     } finally {
       setSubmitting(false);
     }
@@ -161,18 +225,26 @@ export default function MoviesScreen() {
   const openAddModal = () => {
     setFormData({ title: '', year: '', rating: '' });
     setFormErrors({});
-    setModalVisible(true);
+    setAddModalVisible(true);
   };
 
-  const closeModal = () => {
-    setModalVisible(false);
+  const closeAddModal = () => {
+    setAddModalVisible(false);
     setFormData({ title: '', year: '', rating: '' });
     setFormErrors({});
+  };
+
+  const closeEditModal = () => {
+    setEditModalVisible(false);
+    setFormData({ title: '', year: '', rating: '' });
+    setFormErrors({});
+    setEditingMovie(null);
   };
 
   const renderMovieItem = ({ item }: { item: Movie }) => (
     <TouchableOpacity
       onPress={() => handleToggleWatched(item)}
+      onLongPress={() => handleLongPress(item)}
       disabled={togglingId === item.id}
       style={[
         styles.movieCard,
@@ -193,14 +265,22 @@ export default function MoviesScreen() {
             </View>
           )}
         </View>
-        {item.rating && (
-          <View style={[
-            styles.ratingBadge,
-            item.watched && styles.ratingBadgeWatched
-          ]}>
-            <Text style={styles.ratingText}>{item.rating}/10</Text>
-          </View>
-        )}
+        <View style={styles.headerActions}>
+          {item.rating && (
+            <View style={[
+              styles.ratingBadge,
+              item.watched && styles.ratingBadgeWatched
+            ]}>
+              <Text style={styles.ratingText}>{item.rating}/10</Text>
+            </View>
+          )}
+          <TouchableOpacity 
+            style={styles.editButton}
+            onPress={() => handleEditMovie(item)}
+          >
+            <Text style={styles.editButtonText}>Sửa</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       
       <View style={styles.movieDetails}>
@@ -245,12 +325,12 @@ export default function MoviesScreen() {
     </View>
   );
 
-  const renderAddMovieModal = () => (
+  const renderMovieModal = (isEdit: boolean) => (
     <Modal
       animationType="slide"
       transparent={true}
-      visible={modalVisible}
-      onRequestClose={closeModal}
+      visible={isEdit ? editModalVisible : addModalVisible}
+      onRequestClose={isEdit ? closeEditModal : closeAddModal}
     >
       <KeyboardAvoidingView 
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -258,8 +338,13 @@ export default function MoviesScreen() {
       >
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Thêm phim mới</Text>
-            <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
+            <Text style={styles.modalTitle}>
+              {isEdit ? 'Chỉnh sửa phim' : 'Thêm phim mới'}
+            </Text>
+            <TouchableOpacity 
+              onPress={isEdit ? closeEditModal : closeAddModal} 
+              style={styles.closeButton}
+            >
               <Text style={styles.closeButtonText}>×</Text>
             </TouchableOpacity>
           </View>
@@ -324,7 +409,7 @@ export default function MoviesScreen() {
           <View style={styles.modalFooter}>
             <TouchableOpacity 
               style={styles.cancelButton} 
-              onPress={closeModal}
+              onPress={isEdit ? closeEditModal : closeAddModal}
               disabled={submitting}
             >
               <Text style={styles.cancelButtonText}>Hủy</Text>
@@ -335,13 +420,15 @@ export default function MoviesScreen() {
                 styles.submitButton,
                 submitting && styles.submitButtonDisabled
               ]} 
-              onPress={handleSubmit}
+              onPress={isEdit ? handleEditSubmit : handleAddSubmit}
               disabled={submitting}
             >
               {submitting ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
-                <Text style={styles.submitButtonText}>Thêm phim</Text>
+                <Text style={styles.submitButtonText}>
+                  {isEdit ? 'Cập nhật' : 'Thêm phim'}
+                </Text>
               )}
             </TouchableOpacity>
           </View>
@@ -393,7 +480,8 @@ export default function MoviesScreen() {
         onRefresh={loadMovies}
       />
 
-      {renderAddMovieModal()}
+      {renderMovieModal(false)} {/* Add Modal */}
+      {renderMovieModal(true)}  {/* Edit Modal */}
     </View>
   );
 }
@@ -486,6 +574,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 8,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   title: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -509,6 +602,17 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     fontWeight: 'bold',
+  },
+  editButton: {
+    backgroundColor: '#FFA000',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  editButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
   },
   ratingBadge: {
     backgroundColor: '#ffd700',

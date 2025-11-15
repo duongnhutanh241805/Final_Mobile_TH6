@@ -201,3 +201,20 @@ export const deleteMovie = async (id: number): Promise<void> => {
     throw error;
   }
 };
+// Thêm hàm này vào services/db.ts
+export const getMovieById = async (id: number): Promise<Movie | null> => {
+  try {
+    if (Platform.OS === "web") {
+      return await db.movies.get(id);
+    } else {
+      const result = await db.getFirstAsync(
+        "SELECT * FROM movies WHERE id = ?",
+        [id]
+      );
+      return result as Movie || null;
+    }
+  } catch (error) {
+    console.error("Error fetching movie by id:", error);
+    return null;
+  }
+};
